@@ -6,7 +6,13 @@
   :license "Unknown yet"
   :depends-on (#:alexandria
                #:cl-fad
+               #:cl-annot
+               #:babel
+               #:zlib
+               #:split-sequence
                #:ironclad)
   :serial t
-  :components ((:file "app")))
+  :components ((:file "utils")
+               (:file "git-api")
+               (:file "app")))
 

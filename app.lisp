@@ -1,8 +1,9 @@
 ;;;; app.lisp
 (defpackage #:gitplot.app
   (:add-use-defaults t)
-      (:use #:cl :capi) 
-        (:export main))
+  (:use #:cl :capi) 
+  (:export main))
+
 (in-package #:gitplot.app)
 
 ;;; constants
@@ -16,10 +17,10 @@
   ((application-interface :initarg :application-interface))
   (:panes
    (git-directory-edit text-input-pane 
-                         :title "Path to Git repository"
-                         :text "/Users/alexeyv/Sources/melpa" ;; temporary
-                         :buttons 
-                         '(:browse-file (:directory t :image :std-file-open) :ok nil))
+                       :title "Path to Git repository"
+                       :text "/Users/alexeyv/Sources/melpa" ;; temporary
+                       :buttons 
+                       '(:browse-file (:directory t :image :std-file-open) :ok nil))
    (plot-pane graph-pane :children-function 'node-children)
    (log-pane collector-pane :buffer-name "GitPlot Output buffer")
    (draw-button push-button :text "Redraw" :callback 'on-draw-button))
@@ -48,8 +49,7 @@
     (setf (main-window application)
           nil)
     ;; Quit by destroying the application interface.
-    (capi:destroy application)
-    ))
+    (capi:destroy application)))
 
 
 (defun on-draw-button (data self)
