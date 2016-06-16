@@ -48,10 +48,19 @@
     (format stream "blob of size ~d bytes~%" (length content))))
 
 
+(defstruct tree-entry name mode hash)
+
 
 (defclass tree (git-object)
-  ()
+  ((entries :initarg :entries :reader tree-entries :initform nil))
   (:documentation "Git Tree object"))
+
+
+(defmethod print-object ((self tree) stream)
+  (with-slots (entries) self
+    (mapcar (lambda (e)
+              (format stream "~a~%" e))
+            entries)))
 
 
 (defclass tag (git-object)
@@ -88,10 +97,6 @@
 (defmethod parse-git-object ((obj (eql 'blob)) data &key start size)
   (let ((blob (make-instance 'blob :content (subseq data start (+ start size)))))
     blob))
-
-
-(defmethod parse-git-object ((obj (eql 'tree)) data &key start size)
-  "tree!")
 
 (defun parse-text-git-data (data start size)
   "Parses the data for text git objects (commit,tag)
@@ -149,4 +154,41 @@ and returns a PAIR:
      (car parsed-data))
     self))
 
+
+(defun parse-tree-entry (data start)
+  "Returns values: entry and position after the entry"
+  (let* ((separator (position 0 data :start start)) ; 0-separator separating header and hash-code
+         (header (split-sequence:split-sequence #\Space ; split header into mode and filename
+                                                (babel:octets-to-string data :start start :end separator)))
+         ;; finally extract 20 bytes of hash
+         (hash (subseq data (1+ separator) (+ separator 21))))
+    ;; return the cons entry + next position to parse
+    (cons (make-tree-entry :mode (car header) :name (cadr header)
+                           :hash
+                           ;; need to downcase to be compatible with the representation
+                           ;; in the file system
+                           (string-downcase (with-output-to-string (s)
+                                              (loop for i upto 19 ; i = 0..19
+                                                    do 
+                                                    (format s "~x" (elt hash i))))))
+          (+ 20 separator))))
+
+(defmethod parse-git-object ((obj (eql 'tree)) data &key start size)
+  ;; format:
+  ;; [mode] [file/folder name]\0[SHA-1 of referencing blob or tree]
+  ;; mode is a string, file/folder name is a string,
+  ;; SHA-1 code is 20 bytes
+  (let ((self (make-instance 'tree))
+        (next-start start))
+    ;; parse in the loop until the end reached
+    (loop while (< next-start (+ start size))
+          do
+          (let ((parsed (parse-tree-entry data next-start)))
+            ;; push the value
+            (push (car parsed) (slot-value self 'entries))
+            ;; ... and increase the position
+            (setf next-start (1+ (cdr parsed)))))
+    ;; finally reverse the parsed list
+    (setf (slot-value self 'entries) (nreverse (slot-value self 'entries)))
+    self))
 
