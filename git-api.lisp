@@ -170,7 +170,7 @@ and returns a PAIR:
                            (string-downcase (with-output-to-string (s)
                                               (loop for i upto 19 ; i = 0..19
                                                     do 
-                                                    (format s "~x" (elt hash i))))))
+                                                    (format s "~x" (system:octet-ref hash i))))))
           (+ 20 separator))))
 
 (defmethod parse-git-object ((obj (eql 'tree)) data &key start size)
