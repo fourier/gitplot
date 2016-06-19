@@ -167,10 +167,7 @@ and returns a PAIR:
                            :hash
                            ;; need to downcase to be compatible with the representation
                            ;; in the file system
-                           (string-downcase (with-output-to-string (s)
-                                              (loop for i upto 19 ; i = 0..19
-                                                    do 
-                                                    (format s "~x" (system:octet-ref hash i))))))
+                           (sha1-to-hex hash))
           (+ 20 separator))))
 
 (defmethod parse-git-object ((obj (eql 'tree)) data &key start size)
