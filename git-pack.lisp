@@ -57,9 +57,10 @@
 (defstruct pack-entry 
   offset data-offset compressed-size uncompressed-size type depth base-hash)
 
+
 (defmethod print-object ((entry pack-entry) stream)
   ;; type size size-in-packfile offset-in-packfile [depth base-SHA-1]
-  (format stream "~a ~a ~a ~a~%"
+  (format stream "~a ~a ~a ~a"
           (switch ((pack-entry-type entry))
             (OBJ-COMMIT "commit")
             (OBJ-TREE "tree")
@@ -67,7 +68,12 @@
             (OBJ-TAG "tag"))
           (pack-entry-uncompressed-size entry)
           (pack-entry-compressed-size entry)
-          (pack-entry-offset entry)))
+          (pack-entry-offset entry))
+  (when (pack-entry-base-hash entry)
+    (format stream "~d ~a"
+            (pack-entry-depth entry)
+            (pack-entry-base-hash entry)))
+  (format stream "~%"))
 
 
 (defun pack-filename-to-index (filename)
@@ -123,16 +129,18 @@
                   (read-pack-entry-header stream)
                 (setf (pack-entry-type current-entry) type
                       (pack-entry-uncompressed-size current-entry) uncompr-len
+                      ;; the actual data starts here (we have read just up to
+                      ;; the data
+                      (pack-entry-data-offset current-entry) (file-position stream)
                       ;; calculate the compressed size (size in pack file) ...
                       (pack-entry-compressed-size current-entry)
-                      ;; ... as difference between offset of the current
+                      ;; ... as difference between data offset of the current
                       ;; and next entry ...
                       (- (if (< i (1- (length index)))
                              (cdr (aref index (1+ i)))
                              ;; or end of file(without SHA-1 trailer of 20 bytes)
                              (- file-length 20))
-                         (pack-entry-offset current-entry))
-                      (pack-entry-data-offset current-entry) (file-position stream))
+                         (pack-entry-data-offset current-entry)))
                 ;; handle entries with deltas
                 (when (or (= type OBJ-REF-DELTA)
                           (= type OBJ-OFS-DELTA))
@@ -163,12 +171,12 @@
   (let ((parent-hash nil)
         (type nil)
         (parent entry)
-        (depth -1))
+        (depth -1)) ; the value will be increased at least once
     (loop do
           (setf type (pack-entry-type parent)
                 parent-hash (pack-entry-base-hash parent)
                 parent (gethash parent-hash table)
-                depth (1+ depth))
+                depth (1+ depth)) ; if no parent then depth = 0
           while parent)
     (values type depth)))
 
