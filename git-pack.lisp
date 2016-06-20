@@ -54,8 +54,24 @@
 (defconstant OBJ-ANY 8)
 (defconstant OBJ-MAX 9)
 
-(defstruct pack-entry 
-  offset data-offset compressed-size uncompressed-size type depth base-hash)
+
+(defstruct pack-entry
+  "Entry in the pack file. This struct represents all the information
+one could get for the pack file entry without actually unpacking it.
+The data could be used in the following way:
+1. Seek the file to the DATA-OFFSET
+2. Read the COMPRESSED-SIZE bytes
+3. Uncompress it to the array of size at least UNCOMPRESSED-SIZE bytes
+4. Parse the data using parser for the TYPE
+For deltas additional steps required.
+"
+  offset ; offset of the entry in a pack file. Offset followed by the VLI-length
+  data-offset ; real offset to the place in file there the compressed data starts
+  compressed-size ; size in bytes of the compressed data
+  uncompressed-size ; size the data should hold after the unpacking
+  type ; type of the entry. Ether commit(1), tree(2), blob(3) or tag(4)
+  depth ; if the entry is a delta, the number of other entries what follows
+  base-hash) ; the SHA1 code of the base object if the entry is delta
 
 
 (defmethod print-object ((entry pack-entry) stream)
@@ -93,6 +109,10 @@
 
 
 (defun parse-pack-file (filename)
+  "Parse the pack file(and index file) and return the hash table
+containing all the entries in this file.
+The key in the hash table is a hex-string SHA1 checksum of the object;
+the value is a instance of PACK-ENTRY structure."
   ;; first parse index file
   (let ((index (parse-index-file (pack-filename-to-index filename))))
     ;; then open the pack file itself.
@@ -153,7 +173,11 @@
                                                     index :key #'cdr)))))))                        
               ;; missing: depth
               (setf (gethash (car (aref index i)) table) current-entry))))
-    ;; update all types for delta entries, taking from most base entry
+    ;; update all types for delta entries, taking from most base entry.
+    ;; We have to do it after collecting all the entries since for
+    ;; OBJ-REF-DELTA delta format the base entry could follow the
+    ;; current instead of being above in the file like it is for
+    ;; entries of type OBJ-OFS-DELTA
     (maphash (lambda (hash entry)
                (declare (ignore hash))
                (when (or (= (pack-entry-type entry) OBJ-REF-DELTA)
