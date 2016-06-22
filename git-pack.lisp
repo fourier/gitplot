@@ -86,7 +86,7 @@ For deltas additional steps required.
           (pack-entry-compressed-size entry)
           (pack-entry-offset entry))
   (when (pack-entry-base-hash entry)
-    (format stream "~d ~a"
+    (format stream " ~d ~a"
             (pack-entry-depth entry)
             (pack-entry-base-hash entry)))
   (format stream "~%"))
@@ -108,7 +108,7 @@ For deltas additional steps required.
     (concatenate 'string (subseq filename 0 pos) ".pack")))
 
 
-(defun parse-pack-file (filename)
+(defun parse-pack-file-impl (filename)
   "Parse the pack file(and index file) and return the hash table
 containing all the entries in this file.
 The key in the hash table is a hex-string SHA1 checksum of the object;
@@ -282,8 +282,18 @@ And finally the length is 6144 + 1733 = 7833
     (values type len base-hash base-offset)))
 
 (defun read-network-vli (stream)
-  "Read the variable-length integer from the stream"
+  "Read the variable-length integer from the stream.
+From the documentation:
+-----------------------
+offset encoding:
+	  n bytes with MSB set in all but the last one.
+	  The offset is then the number constructed by
+	  concatenating the lower 7 bit of each byte, and
+	  for n >= 2 adding 2^7 + 2^14 + ... + 2^(7*(n-1))
+	  to the result.
+-----------------------"
   (declare (optimize (float 0)))
+  ;; read the first byte
   (let* ((head (read-byte stream))
          (value (logand 127 head)))
     (loop while (>= head 128)
@@ -292,6 +302,33 @@ And finally the length is 6144 + 1733 = 7833
             (incf value)
             (setf head (read-byte stream))
             (setf value (+ (ash value 7) (logand head 127)))))
+    value))
+
+
+(defun read-delta-vli (stream)
+  "Read the encoded variable-length integer used
+to specify size of delta.
+
+Details: this size is encoded in
+little-endian format, therefore the most significant byte comes last"
+  (declare (optimize (float 0)))
+  ;; read the first byte
+  (let* ((head (read-byte stream))
+         ;; first value is this byte without MSB
+         (value (logand 127 head))
+         ;; shitf accumulator
+         (shift 7))
+    (loop while (>= head 128)
+          do
+          (progn
+            ;; next byte
+            (setf head (read-byte stream))
+            ;; shift read byte (without MSB) to accumulated shift
+            ;; so every next byte is more significant than previous
+            ;; and accumulate value
+            (incf value (ash (logand head 127) shift))
+            ;; increase a shift for the next significant byte
+            (incf shift 7)))
     value))
   
                               
@@ -407,4 +444,90 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
                 (aref big-offsets-table (cdr x))))))
     offsets))
 
+(defclass pack-file ()
+  ((pack-filename :initarg :pack-filename :initform nil :reader pack-filename)
+   (index-table :initform nil :reader index-table))
+  (:documentation "A class representing the pack file contents"))
+
+
+(defmethod initialize-instance :after ((self pack-file) &key &allow-other-keys)
+  "Constructor for the main-window class"
+  (with-slots (pack-filename index-table) self
+    (setf index-table (parse-pack-file-impl pack-filename))))
+
+
+@export
+(defun parse-pack-file (filename)
+  (make-instance 'pack-file :pack-filename filename))
+
+@export
+(defmethod get-object-by-hash ((self pack-file) hash)
+  "Find the object in the packfile. Return the uncompressed object
+from the pack file as a vector of bytes."
+  (with-slots (pack-filename index-table) self
+    ;; find the object
+    (when-let (entry (gethash hash index-table))
+      ;; open pack file
+      (with-open-file (stream
+                       pack-filename
+                       :direction :input
+                       :element-type '(unsigned-byte 8))
+        ;; if not a delta object just return it
+        (if (not (pack-entry-base-hash entry))
+            (get-object-chunk entry stream)
+            ;; otherwise collect all delta objects
+            (let ((delta-queue (list entry)))
+              (loop while (pack-entry-base-hash entry)
+                    do
+                    (progn 
+                      (push (gethash (pack-entry-base-hash entry) index-table)
+                            delta-queue)
+                      (setf entry (car delta-queue))))
+              (apply-deltas
+               (mapcar (rcurry #'get-object-chunk stream) delta-queue))))))))
+
+
+(defun get-object-chunk (entry stream)
+  "Return the uncompressed data for pack-entry from the opened file stream"
+  ;; move to position data-offset
+  (file-position stream (pack-entry-data-offset entry))
+  ;; uncompress chunk 
+  (zlib:uncompress
+   ;; of size compressed-size
+   (let ((object (make-array (pack-entry-compressed-size entry)
+                             :element-type '(unsigned-byte 8)
+                             :fill-pointer t)))
+     (read-sequence object stream)
+     object) :uncompressed-size (pack-entry-uncompressed-size entry)))
+
+
+(defun apply-deltas (delta-queue)
+  "Reconstuct the object by given list of deltas and the base
+object at the head of the list.
+Deltas should be applied consequently, i.e.
+head - is the very base object
+second element is the delta to this object,
+third is the delta to the object constructed by applying second delta
+to the head of the list and so on."
+  (let ((result (apply-delta (car delta-queue) (cadr delta-queue))))
+    result))
+    
+
+
+(defun apply-delta (base delta)
+  (let* ((stream (flexi-streams:make-in-memory-input-stream delta))
+         (source-length (read-delta-vli stream))
+         (target-length (read-delta-vli stream))
+         (position (file-position stream))
+         (result (make-array target-length
+                             :element-type '(unsigned-byte 8)
+                             :fill-pointer t)))
+    (format t "source length: ~d~%" source-length)
+    (format t "target length: ~d~%" target-length)
+    (format t "position in stream: ~d~%" position)
+    ;; sanity check
+    (assert (= (length base) source-length))
+    ;; implementation of the patching
+;;    (loop do 
+    result))
 
