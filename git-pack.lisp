@@ -518,16 +518,38 @@ to the head of the list and so on."
   (let* ((stream (flexi-streams:make-in-memory-input-stream delta))
          (source-length (read-delta-vli stream))
          (target-length (read-delta-vli stream))
-         (position (file-position stream))
+         (pos (file-position stream))
          (result (make-array target-length
                              :element-type '(unsigned-byte 8)
                              :fill-pointer t)))
     (format t "source length: ~d~%" source-length)
     (format t "target length: ~d~%" target-length)
-    (format t "position in stream: ~d~%" position)
+    (format t "position in stream: ~d~%" pos)
     ;; sanity check
     (assert (= (length base) source-length))
+    (print (subseq delta pos 10))
     ;; implementation of the patching
-;;    (loop do 
+    ;; switch the diff type
+    (let ((dest-pos 0) ;; position in result buffer
+          (current-byte (aref delta pos)))
+      (incf pos)
+      (if (logand current-byte #x80) ; MSB is set, operation is copy
+          (multiple-value-bind (new-pos offset len)
+              (decode-delta-copy-cmd delta pos)
+            ;; do the magic
+            (incf pos new-pos)
+            (incf dest-pos len))
+          ;; MSB is not set, operation is insert
+          (let ((len (logand 127 current-byte)))
+            (replace result delta :start1 dest-pos :end1 (+ dest-pos len)
+                     :start2 pos :end2 (+ pos len)))))
     result))
+
+
+(defun decode-delta-copy-cmd (delta pos)
+  "Decodes the delta copy command inside pack DELTA array.
+The POS is the current position on the DELTA array.
+Returns values: (new position, offset, size) to copy"
+  (values pos 9 9))
+
 
