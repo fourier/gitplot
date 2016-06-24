@@ -128,3 +128,10 @@ NOTE: OFFSET is ignored for streams"
      (dotimes (x 20)
        (format s "~2,'0x" (read-byte stream)))
     s)))
+
+
+(defun make-vector-view (vector start end)
+  "Returns array displaced to the vector (starting with start, ending on end)"
+  (make-array (- end start 1)
+              :displaced-to vector
+              :displaced-index-offset start))

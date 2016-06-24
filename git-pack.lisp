@@ -519,6 +519,7 @@ to the head of the list and so on."
          (source-length (read-delta-vli stream))
          (target-length (read-delta-vli stream))
          (pos (file-position stream))
+         (end (length delta))
          (result (make-array target-length
                              :element-type '(unsigned-byte 8)
                              :fill-pointer t)))
@@ -527,29 +528,47 @@ to the head of the list and so on."
     (format t "position in stream: ~d~%" pos)
     ;; sanity check
     (assert (= (length base) source-length))
-    (print (subseq delta pos 10))
     ;; implementation of the patching
     ;; switch the diff type
-    (let ((dest-pos 0) ;; position in result buffer
-          (current-byte (aref delta pos)))
-      (incf pos)
-      (if (logand current-byte #x80) ; MSB is set, operation is copy
-          (multiple-value-bind (new-pos offset len)
-              (decode-delta-copy-cmd delta pos)
-            ;; do the magic
-            (incf pos new-pos)
-            (incf dest-pos len))
-          ;; MSB is not set, operation is insert
-          (let ((len (logand 127 current-byte)))
-            (replace result delta :start1 dest-pos :end1 (+ dest-pos len)
-                     :start2 pos :end2 (+ pos len)))))
+    (let ((dest-pos 0)) ;; position in result buffer
+      (loop while (< pos end)
+            do
+            (cond ((> (logand (aref delta pos) #x80) 0); MSB is set, operation is copy
+                   (multiple-value-bind (new-pos offset len)
+                       (decode-delta-copy-cmd delta (incf pos))
+                     ;; do the magic
+                     (replace result base :start1 offset :end1 (+ offset len)
+                              :start2 pos :end2 (+ pos len))
+                     (incf pos new-pos)
+                     (incf dest-pos len)))
+                  ((> (aref delta pos) 0) ;; MSB is not set, operation is insert
+                   ;; looks fine in debugger
+                   (let ((current-byte (aref delta pos)))
+                     (incf pos)
+                     (replace result delta :start1 dest-pos :end1 (+ dest-pos current-byte)
+                              :start2 pos :end2 (+ pos current-byte))
+                     (incf pos current-byte)
+                     (incf dest-pos current-byte)))
+                  (t (error "Unexpected delta command 0")))))
     result))
+
 
 
 (defun decode-delta-copy-cmd (delta pos)
   "Decodes the delta copy command inside pack DELTA array.
 The POS is the current position on the DELTA array.
 Returns values: (new position, offset, size) to copy"
-  (values pos 9 9))
+  (let* ((current-byte (aref delta pos))
+         (offset (logand 15 current-byte))
+         (len (ash (logand 112 current-byte) -4))
+         (real-offset 0)
+         (real-len 0))
+    (macrolet ((uncompress-byte (compr-var out-var)
+                 `(when (> (logand (ash 1 i) ,compr-var) 0)
+                      (setf current-byte (aref delta (incf pos))
+                            ,out-var (logior ,out-var (ash current-byte (* i 8)))))))
+      (loop for i from 0 to 3 do (uncompress-byte offset real-offset))
+      (loop for i from 1 to 3 do (uncompress-byte len real-len)))
+    (values pos real-offset real-len)))
 
 
