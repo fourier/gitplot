@@ -535,11 +535,12 @@ to the head of the list and so on."
             do
             (cond ((> (logand (aref delta pos) #x80) 0); MSB is set, operation is copy
                    (multiple-value-bind (new-pos offset len)
-                       (decode-delta-copy-cmd delta (incf pos))
+                       (decode-delta-copy-cmd delta  pos)
                      ;; do the magic
                      (replace result base :start1 offset :end1 (+ offset len)
                               :start2 pos :end2 (+ pos len))
-                     (incf pos new-pos)
+                     (setf pos new-pos)
+                     (incf pos)
                      (incf dest-pos len)))
                   ((> (aref delta pos) 0) ;; MSB is not set, operation is insert
                    ;; looks fine in debugger
@@ -558,6 +559,7 @@ to the head of the list and so on."
   "Decodes the delta copy command inside pack DELTA array.
 The POS is the current position on the DELTA array.
 Returns values: (new position, offset, size) to copy"
+  ;; tested against patch-delta.c from git
   (let* ((current-byte (aref delta pos))
          (offset (logand 15 current-byte))
          (len (ash (logand 112 current-byte) -4))
@@ -568,7 +570,7 @@ Returns values: (new position, offset, size) to copy"
                       (setf current-byte (aref delta (incf pos))
                             ,out-var (logior ,out-var (ash current-byte (* i 8)))))))
       (loop for i from 0 to 3 do (uncompress-byte offset real-offset))
-      (loop for i from 1 to 3 do (uncompress-byte len real-len)))
+      (loop for i from 0 to 2 do (uncompress-byte len real-len)))
     (values pos real-offset real-len)))
 
 
