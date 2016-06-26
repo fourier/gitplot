@@ -11,8 +11,8 @@
 ;; read the source: https://github.com/git/git/blob/master/pack-write.c
 ;;
 (defpackage #:gitplot.git-pack
-  (:use #:cl #:cl-annot.class #:alexandria #:gitplot.utils)
-  (:export main))
+  (:use #:cl #:cl-annot.class #:alexandria #:gitplot.utils))
+
 
 (in-package #:gitplot.git-pack)
 (annot:enable-annot-syntax)
@@ -55,33 +55,56 @@
 (defconstant OBJ-MAX 9)
 
 
-(defstruct pack-entry
-  "Entry in the pack file. This struct represents all the information
+@export-class
+(defclass pack-entry  ()
+  ((offset :initarg :offset :initform nil
+           :accessor pack-entry-offset
+           :documentation "offset of the entry in a pack file. Offset followed by the VLI-length")
+   (data-offset :initarg :data-offset :initform nil
+                :accessor pack-entry-data-offset
+                :documentation "real offset to the place in file there the compressed data starts")
+   (compressed-size :initarg :compressed-size :initform nil
+                    :accessor pack-entry-compressed-size
+                    :documentation "size in bytes of the compressed data")
+   (uncompressed-size :initarg :uncompressed-size :initform nil
+                      :accessor pack-entry-uncompressed-size
+                      :documentation "size the data should hold after the unpacking")
+   (type :initarg :type :initform nil
+         :reader pack-entry-type
+         :documentation "type of the entry. Ether commit(1), tree(2), blob(3) or tag(4")
+   (depth :initarg :depth :initform nil
+          :accessor pack-entry-depth
+          :documentation "if the entry is a delta, the number of other entries what follows")
+   (base-hash :initarg :depth :initform nil
+              :accessor pack-entry-base-hash
+              :documentation "the SHA1 code of the base object if the entry is delta"))
+  (:documentation "Entry in the pack file. This struct represents all the information
 one could get for the pack file entry without actually unpacking it.
 The data could be used in the following way:
 1. Seek the file to the DATA-OFFSET
 2. Read the COMPRESSED-SIZE bytes
 3. Uncompress it to the array of size at least UNCOMPRESSED-SIZE bytes
 4. Parse the data using parser for the TYPE
-For deltas additional steps required.
-"
-  offset ; offset of the entry in a pack file. Offset followed by the VLI-length
-  data-offset ; real offset to the place in file there the compressed data starts
-  compressed-size ; size in bytes of the compressed data
-  uncompressed-size ; size the data should hold after the unpacking
-  type ; type of the entry. Ether commit(1), tree(2), blob(3) or tag(4)
-  depth ; if the entry is a delta, the number of other entries what follows
-  base-hash) ; the SHA1 code of the base object if the entry is delta
+For deltas additional steps required."))
+  
 
+(defmethod (setf pack-entry-type) (value (entry pack-entry))
+  (setf (slot-value entry 'type) value)
+  (switch (value)
+    (OBJ-COMMIT (setf (slot-value entry 'type) :commit))
+    (OBJ-TAG (setf (slot-value entry 'type) :tag))
+    (OBJ-TREE (setf (slot-value entry 'type) :tree))
+    (OBJ-BLOB (setf (slot-value entry 'type) :blob)))
+  (slot-value entry 'type))
 
 (defmethod print-object ((entry pack-entry) stream)
   ;; type size size-in-packfile offset-in-packfile [depth base-SHA-1]
   (format stream "~a ~a ~a ~a"
           (switch ((pack-entry-type entry))
-            (OBJ-COMMIT "commit")
-            (OBJ-TREE "tree")
-            (OBJ-BLOB "blob")
-            (OBJ-TAG "tag"))
+            (:commit "commit")
+            (:tree "tree")
+            (:blob "blob")
+            (:tag "tag"))
           (pack-entry-uncompressed-size entry)
           (pack-entry-compressed-size entry)
           (pack-entry-offset entry))
@@ -140,7 +163,7 @@ the value is a instance of PACK-ENTRY structure."
     (loop for i from 0 below (length index) do
           ;; fill the table.
           (progn
-            (let ((current-entry (make-pack-entry :offset (cdr (aref index i)))))
+            (let ((current-entry (make-instance 'pack-entry :offset (cdr (aref index i)))))
               ;; move position to the current entry offset
               (file-position stream (pack-entry-offset current-entry))
               ;; read the header - type (car header)
@@ -180,8 +203,8 @@ the value is a instance of PACK-ENTRY structure."
     ;; entries of type OBJ-OFS-DELTA
     (maphash (lambda (hash entry)
                (declare (ignore hash))
-               (when (or (= (pack-entry-type entry) OBJ-REF-DELTA)
-                         (= (pack-entry-type entry) OBJ-OFS-DELTA))
+               (when (or (eql (pack-entry-type entry) OBJ-REF-DELTA)
+                         (eql (pack-entry-type entry) OBJ-OFS-DELTA))
                  (multiple-value-bind (type depth)
                      (get-base-pack-entry-type table entry)
                    (setf (pack-entry-type entry) type
@@ -444,6 +467,7 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
                 (aref big-offsets-table (cdr x))))))
     offsets))
 
+@export-class
 (defclass pack-file ()
   ((pack-filename :initarg :pack-filename :initform nil :reader pack-filename)
    (index-table :initform nil :reader index-table))
@@ -451,7 +475,7 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
 
 
 (defmethod initialize-instance :after ((self pack-file) &key &allow-other-keys)
-  "Constructor for the main-window class"
+  "Constructor for the pack-file class"
   (with-slots (pack-filename index-table) self
     (setf index-table (parse-pack-file-impl pack-filename))))
 
@@ -461,7 +485,7 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
   (make-instance 'pack-file :pack-filename filename))
 
 @export
-(defmethod get-object-by-hash ((self pack-file) hash)
+(defmethod pack-get-object-by-hash ((self pack-file) hash)
   "Find the object in the packfile. Return the uncompressed object
 from the pack file as a vector of bytes."
   (with-slots (pack-filename index-table) self

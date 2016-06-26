@@ -10,11 +10,13 @@
                #:babel          ; bytes to string
                #:zlib           ; zlib to deal with git objects
                #:split-sequence ; general split
-               #:nibbles        ; to parse binary data 
+               #:nibbles        ; to parse binary data
+               #:flexi-streams  ; to create in-memory streams
                #:ironclad)      ; sha1 checksum
   :serial t
   :components ((:file "utils")
                (:file "git-pack")
+               (:file "git-object")
                (:file "git-api")
                (:file "app")))
 
