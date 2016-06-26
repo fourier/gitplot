@@ -537,8 +537,8 @@ to the head of the list and so on."
                    (multiple-value-bind (new-pos offset len)
                        (decode-delta-copy-cmd delta  pos)
                      ;; do the magic
-                     (replace result base :start1 offset :end1 (+ offset len)
-                              :start2 pos :end2 (+ pos len))
+                     (replace result base :start1 dest-pos :end1 (+ dest-pos len)
+                              :start2 offset :end2 (+ offset len))
                      (setf pos new-pos)
                      (incf pos)
                      (incf dest-pos len)))
