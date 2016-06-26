@@ -509,7 +509,9 @@ head - is the very base object
 second element is the delta to this object,
 third is the delta to the object constructed by applying second delta
 to the head of the list and so on."
-  (let ((result (apply-delta (car delta-queue) (cadr delta-queue))))
+  (let ((result (car delta-queue)))
+    (dolist (delta (cdr delta-queue))
+      (setf result (apply-delta result delta)))
     result))
     
 
@@ -523,9 +525,6 @@ to the head of the list and so on."
          (result (make-array target-length
                              :element-type '(unsigned-byte 8)
                              :fill-pointer t)))
-    (format t "source length: ~d~%" source-length)
-    (format t "target length: ~d~%" target-length)
-    (format t "position in stream: ~d~%" pos)
     ;; sanity check
     (assert (= (length base) source-length))
     ;; implementation of the patching
@@ -539,8 +538,7 @@ to the head of the list and so on."
                      ;; do the magic
                      (replace result base :start1 dest-pos :end1 (+ dest-pos len)
                               :start2 offset :end2 (+ offset len))
-                     (setf pos new-pos)
-                     (incf pos)
+                     (setf pos (1+ new-pos))
                      (incf dest-pos len)))
                   ((> (aref delta pos) 0) ;; MSB is not set, operation is insert
                    ;; looks fine in debugger
