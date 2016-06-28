@@ -7,6 +7,13 @@
 (annot:enable-annot-syntax)
 
 ;;----------------------------------------------------------------------------
+;; Constants
+;;----------------------------------------------------------------------------
+(defconstant *zero-ascii-begin* (char-code #\0))
+(defconstant *char-ascii-begin* (char-code #\a))
+
+
+;;----------------------------------------------------------------------------
 ;; Utility macros
 ;;----------------------------------------------------------------------------
 @export
@@ -35,6 +42,15 @@ In the last example imports all the exported symbols from the package given."
                    (let ((import-symbol (find-symbol (string-upcase (symbol-name symb)) pkg)))
                      `(shadowing-import ,(list 'quote import-symbol))))
                  symbols)))))
+
+
+@export
+(defmacro read-one-line (filename)
+  "Read exactly one first line from the file"
+  (let ((stream-var (gensym)))
+    `(with-open-file (,stream-var ,filename :direction :input)
+       (read-line ,stream-var))))
+
 
 ;;----------------------------------------------------------------------------
 ;; Utility functions
@@ -105,14 +121,6 @@ NOTE: OFFSET is ignored for streams"
     (t nil)))
 
 
-(defun sha1-array-to-hex (arr offset)
-  (string-downcase
-   (with-output-to-string (s)  
-    (loop for i from offset below (+ offset 20)
-          do
-          (format s "~2,'0x" (system:octet-ref arr i)))
-    s)))
-
 (defun sha1-list-to-hex (lst offset)
   (string-downcase
    (with-output-to-string (s)  
@@ -122,12 +130,47 @@ NOTE: OFFSET is ignored for streams"
     s)))
 
 
+(defun sha1-array-to-hex (array offset)
+  (declare (optimize (speed 3) (safety 0)))
+  (declare ((unsigned-byte 8) num))
+  (macrolet ((digit-to-hex (dig)
+               (let ((digit-var (gensym)))
+                 `(let ((,digit-var ,dig))
+                    (if (< ,dig 10)
+                        (+ *zero-ascii-begin* ,dig)
+                        (+ (- ,dig 10) *char-ascii-begin*))))))
+    (let ((hex (make-array 40 :element-type 'character :fill-pointer 0 :adjustable nil))) 
+      (dotimes (x 20)
+        (declare (integer x))
+        (let ((byte (aref array (+ x offset))))
+          (declare ((unsigned-byte 8) byte)) 
+          (let* ((upper-byte (ash byte -4))
+                 (lower-byte (- byte (ash upper-byte 4))))
+            (vector-push (code-char (digit-to-hex upper-byte)) hex)
+            (vector-push (code-char (digit-to-hex lower-byte)) hex))))
+      hex)))
+
 (defun sha1-stream-to-hex (stream)
-  (string-downcase
-   (with-output-to-string (s)
-     (dotimes (x 20)
-       (format s "~2,'0x" (read-byte stream)))
-    s)))
+  (declare (optimize (speed 3) (safety 0)))
+  (declare ((unsigned-byte 8) num))
+  (macrolet ((digit-to-hex (dig)
+               (let ((digit-var (gensym)))
+                 `(let ((,digit-var ,dig))
+                    (if (< ,dig 10)
+                        (+ *zero-ascii-begin* ,dig)
+                        (+ (- ,dig 10) *char-ascii-begin*))))))
+    (let ((hex (make-array 40 :element-type 'character :fill-pointer 0 :adjustable nil))) 
+      (dotimes (x 20)
+        (declare (integer x))
+        (let ((byte (read-byte stream)))
+          (declare ((unsigned-byte 8) byte)) 
+          (let* ((upper-byte (ash byte -4))
+                 (lower-byte (- byte (ash upper-byte 4))))
+            (vector-push (code-char (digit-to-hex upper-byte)) hex)
+            (vector-push (code-char (digit-to-hex lower-byte)) hex))))
+      hex)))
+
+
 
 
 (defun make-vector-view (vector start end)
@@ -135,3 +178,4 @@ NOTE: OFFSET is ignored for streams"
   (make-array (- end start 1)
               :displaced-to vector
               :displaced-index-offset start))
+

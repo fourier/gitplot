@@ -59,12 +59,39 @@
                   ;; and finally parse the data (the type is known from index)
                   (parse-git-object (pack-entry-type result)
                                     data
+                                    hash
                                     :start 0
                                     :size (length data))))))))))
                 
-      
-      
+@export
+(defmethod get-head-hash ((self git-repo))
+  (with-slots (path) self
+    (let* ((head-file (concatenate 'string path ".git/HEAD"))
+           (head-contents (read-one-line head-file)))
+      ;; check if the HEAD points to the detached commit
+      (if (not (starts-with-subseq "ref: " head-contents))
+          head-contents
+          ;; otherwise search if this file exists
+          (let* ((head-ref (cadr (split-sequence:split-sequence #\space head-contents)))
+                 (head-ref-file (concatenate 'string path ".git/" head-ref)))
+            ;; check if head points to ref which is a normal file
+            (if (fad:file-exists-p head-ref-file)
+                (read-one-line head-ref-file)
+                ;; otherwise read the ref from the packed-refs
+                (with-open-file (stream (concatenate 'string path ".git/packed-refs")
+                                        :direction :input)
+                  (loop for line = (read-line stream nil)
+                        while (and line (not (ends-with-subseq head-ref line)))
+                        finally (car (split-sequence:split-sequence #\space line))))))))))
 
 
+@export
+(defmethod get-head-commit ((self git-repo))
+  (get-object-by-hash self (get-head-hash self)))
+
+
+@export
+(defmethod get-commit-parents ((self git-repo) (object gitplot.git-object:commit))
+  (mapcar (curry #'get-object-by-hash self) (commit-parents object)))
 
 

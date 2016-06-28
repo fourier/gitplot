@@ -8,11 +8,12 @@
 ;;----------------------------------------------------------------------------
 ;; Git Object class
 ;;----------------------------------------------------------------------------
+@export-class
 (defclass git-object ()
   ((hash :initarg :hash :reader object-hash :type '(vector unsigned-byte 8)))
   (:documentation "Base class for Git objects"))
 
-
+@export-class
 (defclass commit (git-object)
   ((tree :initarg :tree :reader commit-tree :initform "")
    (author :initarg :author :reader commit-author :initform "")
@@ -29,6 +30,7 @@
     (format stream "parents ~{~a~^, ~}~%" parents)
     (format stream "comment~%~a" comment))) 
 
+@export-class
 (defclass blob (git-object)
   ((content :initarg :content :reader blob-content :initform nil))
   (:documentation "Git Blob object"))
@@ -37,10 +39,10 @@
   (with-slots (content) self
     (format stream "blob of size ~d bytes~%" (length content))))
 
-
+@export-class
 (defstruct tree-entry name mode hash)
 
-
+@export-class
 (defclass tree (git-object)
   ((entries :initarg :entries :reader tree-entries :initform nil))
   (:documentation "Git Tree object"))
@@ -52,7 +54,7 @@
               (format stream "~a~%" e))
             entries)))
 
-
+@export-class
 (defclass tag (git-object)
   ((object :initarg :tree :reader tag-object :initform "")
    (type :initarg :author :reader tag-type :initform "")
@@ -77,17 +79,22 @@
          (header 
           (babel:octets-to-string data :start 0 :end content-start
                                   :encoding :utf-8))
-         (header-split (split-sequence:split-sequence #\Space header)))
+         (header-split (split-sequence:split-sequence #\Space header))
+         ;; guess the hash. hash is the last 41 (40 hash + 1 directory separator)
+         ;; characters of the filename, if the filename is in git repository
+         ;; and not renamed git object
+         (hash-filename (subseq filename (- (length filename) 41))))
     (parse-git-object (intern (string-upcase (car header-split)) "KEYWORD")
                       data
+                      (remove #\/ hash-filename) ;; remove dir separator
                       :start (1+ content-start)
                       :size (parse-integer (cadr header-split)))))
 
 @export
-(defgeneric parse-git-object (type data &key start size))
+(defgeneric parse-git-object (type data hash &key start size))
 
-(defmethod parse-git-object ((obj (eql :blob)) data &key start size)
-  (let ((blob (make-instance 'blob :content (subseq data start (+ start size)))))
+(defmethod parse-git-object ((obj (eql :blob)) data hash &key start size)
+  (let ((blob (make-instance 'blob :hash hash :content (subseq data start (+ start size)))))
     blob))
 
 (defun parse-text-git-data (data start size)
@@ -115,9 +122,9 @@ and returns a PAIR:
           comment)))
 
 
-(defmethod parse-git-object ((obj (eql :commit)) data &key start size)
+(defmethod parse-git-object ((obj (eql :commit)) data hash &key start size)
   (let* ((parsed-data (parse-text-git-data data start size))
-         (commit (make-instance 'commit :comment (cdr parsed-data))))
+         (commit (make-instance 'commit :hash hash :comment (cdr parsed-data))))
     (with-slots (tree author committer parents) commit
       (mapcar
        (lambda (line)
@@ -134,9 +141,9 @@ and returns a PAIR:
     
 
 
-(defmethod parse-git-object ((obj (eql :tag)) data &key start size)
+(defmethod parse-git-object ((obj (eql :tag)) data hash &key start size)
   (let* ((parsed-data (parse-text-git-data data start size))
-         (self (make-instance 'tag :comment (cdr parsed-data))))
+         (self (make-instance 'tag :hash hash :comment (cdr parsed-data))))
     (mapcar
      (lambda (line)
        (let* ((space-pos (position #\Space line))
@@ -162,12 +169,12 @@ and returns a PAIR:
                            (sha1-to-hex hash))
           (+ 20 separator))))
 
-(defmethod parse-git-object ((obj (eql :tree)) data &key start size)
+(defmethod parse-git-object ((obj (eql :tree)) data hash &key start size)
   ;; format:
   ;; [mode] [file/folder name]\0[SHA-1 of referencing blob or tree]
   ;; mode is a string, file/folder name is a string,
   ;; SHA-1 code is 20 bytes
-  (let ((self (make-instance 'tree))
+  (let ((self (make-instance 'tree :hash hash))
         (next-start start))
     ;; parse in the loop until the end reached
     (loop while (< next-start (+ start size))
