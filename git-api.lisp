@@ -27,8 +27,8 @@
     ;; append trailing "/"
     (unless (ends-with "/" path)
       (setf path (concatenate 'string path "/")))
-    (let ((files (directory (concatenate 'string path ".git/objects/pack/*.pack"))))
-      (mapcar (lambda (pack) (push (parse-pack-file (namestring pack)) pack-files)) files))))
+    (let ((files (directory (concatenate 'string path ".git/objects/pack/*.idx"))))
+      (mapcar (lambda (pack) (push (gitplot.git-pack::parse-index-file (namestring pack)) pack-files)) files))))
 
 
 @export
