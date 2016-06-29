@@ -170,9 +170,26 @@ NOTE: OFFSET is ignored for streams"
             (vector-push (code-char (digit-to-hex lower-byte)) hex))))
       hex)))
 
+@export
+(defun sha1-hex-to-array (sha1string &optional result)
+  "Convert the given sha1 string in hex (with lower case characters)
+to the byte array.
+If RESULT array is given - write to this array"
+  (unless result
+    (setf result (make-array 20 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable nil)))
+  (macrolet ((hex-to-number (hex)
+               (let ((hex-var (gensym)))
+                 `(let ((,hex-var (char-code ,hex)))
+                    (if (>= ,hex-var *char-ascii-begin*)
+                        (+ 10 (- ,hex-var *char-ascii-begin*))
+                        (- ,hex-var *zero-ascii-begin*))))))
+    (dotimes (x 20)
+      (let ((upper-val (hex-to-number (aref sha1string (* x 2))))
+            (lower-val (hex-to-number (aref sha1string (1+ (* x 2))))))
+        (vector-push (+ (ash upper-val 4) lower-val) result))))
+  result)
 
-
-
+  
 (defun make-vector-view (vector start end)
   "Returns array displaced to the vector (starting with start, ending on end)"
   (make-array (- end start 1)

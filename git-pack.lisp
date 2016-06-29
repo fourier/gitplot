@@ -57,7 +57,10 @@
 
 @export-class
 (defclass pack-entry  ()
-  ((offset :initarg :offset :initform nil
+  ((loaded :initarg :loaded :initform nil
+           :reader loaded
+           :documentation "If the entry is loaded from the pack file")
+   (offset :initarg :offset :initform nil
            :accessor pack-entry-offset
            :documentation "offset of the entry in a pack file. Offset followed by the VLI-length")
    (data-offset :initarg :data-offset :initform nil
@@ -131,34 +134,68 @@ For deltas additional steps required."))
     (concatenate 'string (subseq filename 0 pos) ".pack")))
 
 
-(defun parse-pack-file-impl (filename)
+(defmethod parse-pack-file-impl ((self pack-file) filename)
   "Parse the pack file(and index file) and return the hash table
 containing all the entries in this file.
 The key in the hash table is a hex-string SHA1 checksum of the object;
 the value is a instance of PACK-ENTRY structure."
-  ;; first parse index file
-  (let ((index (parse-index-file (pack-filename-to-index filename))))
-    ;; then open the pack file itself.
-    ;; at this point we know offsets of entries in pack file from the index file
-    (with-open-file (stream filename
-                            :direction :input
-                            :element-type '(unsigned-byte 8))
-      (let ((header (make-array 4
-                                :element-type '(unsigned-byte 8)
-                                :fill-pointer t)))
-        (read-sequence header stream :end 4)
-        ;; check header word
-        (when (and (string= (octets-to-string header) +pack-file-header-word+)
-                   ;; and version = 2
-                   (= +pack-version+ (read-ub32/be stream)))
-          (let ((objects-count (read-ub32/be stream)))
-            ;; sanity check
-            (assert (= objects-count (length index)))
-            (create-pack-entries-table index stream)))))))
+  (with-slots (index-table) self
+    ;; first parse index file
+    (let ((index (parse-index-file (pack-filename-to-index filename))))
+      ;; then open the pack file itself.
+      ;; at this point we know offsets of entries in pack file from the index file
+      (with-open-file (stream filename
+                              :direction :input
+                              :element-type '(unsigned-byte 8))
+        (let ((header (make-array 4
+                                  :element-type '(unsigned-byte 8)
+                                  :fill-pointer t)))
+          (read-sequence header stream :end 4)
+          ;; check header word
+          (when (and (string= (octets-to-string header) +pack-file-header-word+)
+                     ;; and version = 2
+                     (= +pack-version+ (read-ub32/be stream)))
+            (let ((objects-count (read-ub32/be stream)))
+              ;; sanity check
+              (assert (= objects-count (length index)))
+              (setf index-table
+                    (create-pack-entries-table-initial index stream)))))))))
+
+
+(defun create-pack-entries-table-initial (index stream)
+  "Create the hash table with the key as sha1 and the value is a cons:
+(offset . compressed-size),  offset in the pack file and compressed
+size(including header).
+INDEX is a sorted list of pairs (sha1 . offset)"
+  (let ((table (make-hash-table :test #'equalp :size (length index)))
+        (file-length (file-length stream)))
+    ;; fill the table.
+    (loop for i from 0 below (length index) do
+          (let* ((offset (car (aref index i)))
+                 ;; calculate the compressed size (size in pack file).
+                 ;; This size includes the header size as well
+                 ;; The size is the  difference between data offset of the current
+                 ;; and next entry...
+                 (compressed-size 
+                  (- (if (< i (1- (length index)))
+                         (car (aref index (1+ i)))
+                         ;; or end of file(without SHA-1 trailer of 20 bytes)
+                         (- file-length 20)) 
+                     offset)))
+
+            (setf (gethash (cdr (aref index i)) table)
+                  (cons offset compressed-size))))
+                  #|
+                (make-instance 'pack-entry
+                               :offset offset
+                               :compressed-size compressed-size))))
+          |#
+    table))
+                                  
 
 
 (defun create-pack-entries-table (index stream)
-  (let ((table (make-hash-table :test #'string= :size (length index)))
+  (let ((table (make-hash-table :test #'equalp :size (length index)))
         (file-length (file-length stream)))
     (loop for i from 0 below (length index) do
           ;; fill the table.
@@ -280,7 +317,9 @@ Third byte, no msb -> 3, shift 11 (4 + 7) = 6144
 And finally the length is 6144 + 1733 = 7833
 "
   (declare (optimize (float 0)))
-  (let* ((base-hash nil)
+  (let* ((base-hash (make-array +sha1-size+
+                                :element-type '(unsigned-byte 8)
+                                :fill-pointer 0 :adjustable nil))
          (base-offset nil)
          (head (read-byte stream))
          (shift 4) ; first part of size is shifted by 4 bits
@@ -298,7 +337,7 @@ And finally the length is 6144 + 1733 = 7833
     (switch (type)
       (OBJ-REF-DELTA
        ;; just read the base hash
-       (setf base-hash (sha1-to-hex stream)))
+       (read-sequence base-hash stream))
       (OBJ-OFS-DELTA
        ;; read the variable-length integer
        (setf base-offset (read-network-vli stream))))
@@ -376,17 +415,22 @@ little-endian format, therefore the most significant byte comes last"
                ;; 3. read sorted list of object names
                (object-names (read-object-names stream size))
                ;; 4. read CRCs of compressed objects
-               (crcs (read-crcs stream size))
+               ;;    Indeed we don't want to read them - there are no use for them now
+               ;;    Let's keep the function in the code so it will be easy
+               ;;    to implement some checks later
+               ; (crcs (read-crcs stream size))
+               (pos (file-position stream (+ (file-position stream) (* 4 size))))
                ;; 5. and finally read offsets in the PACK file
                (offsets (read-offsets stream size))
-               ;; an array of CONSes - object SHA1 code and its offset
-               (pack-index-entries (make-array size)))
-          (declare (ignore crcs))
+               ;; now sort pack offsets
+               (index (make-array size :adjustable nil)))
+          (declare (ignore pos))
           (loop for i from 0 below size do
-                (setf (aref pack-index-entries i)
-                      (cons (sha1-to-hex (aref object-names i)) (aref offsets i))))
-          ;; sort pack index entries according to offset
-          (sort pack-index-entries #'< :key #'cdr))))))
+                (setf (aref index i) (cons (aref offsets i) (aref object-names i))))
+          (sort index #'< :key (lambda (x) (the integer (car x)))))))))
+
+          
+
                
           
 
@@ -411,9 +455,9 @@ less or equal to 256, as the byte <= 256"
 
 (defun read-object-names (stream size)
   "Read the SIZE 20-bytes SHA1 codes of objects stored in PACK file"
-  (let ((object-names (make-array size :element-type '(vector unsigned-byte 8))))
+  (let ((object-names (make-array size :element-type '(vector unsigned-byte 8) :adjustable nil)))
     (loop for i from 0 below size do
-          (let ((hash (make-array +sha1-size+ :element-type '(unsigned-byte 8))))
+          (let ((hash (make-array +sha1-size+ :element-type '(unsigned-byte 8) :adjustable nil)))
             (read-sequence hash stream)
             (setf (aref object-names i) hash)))
     object-names))
@@ -432,10 +476,10 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
     
 (defun read-offsets (stream size)
   "Read offset table[s] and return the array of offsets in PACK file"
-  (let* ((offsets (make-array size :element-type 'integer))
+  (let* ((offsets (make-array size :element-type 'fixnum :adjustable nil))
          (big-offsets nil)
          (bytes-size (* size 4))
-         (table (make-array bytes-size :element-type '(unsigned-byte 8))))
+         (table (make-array bytes-size :element-type '(unsigned-byte 8)  :adjustable nil)))
     ;; we will read all the table into bytes array
     (read-sequence table stream)
     (loop for i from 0 below bytes-size by 4 do
@@ -476,8 +520,8 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
 
 (defmethod initialize-instance :after ((self pack-file) &key &allow-other-keys)
   "Constructor for the pack-file class"
-  (with-slots (pack-filename index-table) self
-    (setf index-table (parse-pack-file-impl pack-filename))))
+  (with-slots (pack-filename) self
+    (parse-pack-file-impl self pack-filename)))
 
 
 @export
