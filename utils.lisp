@@ -175,6 +175,9 @@ NOTE: OFFSET is ignored for streams"
   "Convert the given sha1 string in hex (with lower case characters)
 to the byte array.
 If RESULT array is given - write to this array"
+  (declare (optimize (speed 3) (safety 0)))
+  (declare ((unsigned-byte 8) upper-val))
+  (declare ((unsigned-byte 8) lower-val))
   (unless result
     (setf result (make-array 20 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable nil)))
   (macrolet ((hex-to-number (hex)
@@ -186,7 +189,7 @@ If RESULT array is given - write to this array"
     (dotimes (x 20)
       (let ((upper-val (hex-to-number (aref sha1string (* x 2))))
             (lower-val (hex-to-number (aref sha1string (1+ (* x 2))))))
-        (vector-push (+ (ash upper-val 4) lower-val) result))))
+        (setf (aref result x) (+ (ash upper-val 4) lower-val)))))
   result)
 
   

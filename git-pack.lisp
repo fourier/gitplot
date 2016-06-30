@@ -54,6 +54,13 @@
 (defconstant OBJ-ANY 8)
 (defconstant OBJ-MAX 9)
 
+;;----------------------------------------------------------------------------
+;; Globals
+;;----------------------------------------------------------------------------
+(defparameter *sha1-binary-array* (make-array +sha1-size+
+                                              :element-type '(unsigned-byte 8)
+                                              :adjustable nil)
+  "Temporary 20 bytes array used to convert sha1 hash from string to binary format")
 
 @export-class
 (defclass pack-entry  ()
@@ -193,7 +200,7 @@ INDEX is a sorted list of pairs (sha1 . offset)"
     table))
                                   
 
-
+#|
 (defun create-pack-entries-table (index stream)
   (let ((table (make-hash-table :test #'equalp :size (length index)))
         (file-length (file-length stream)))
@@ -228,11 +235,20 @@ INDEX is a sorted list of pairs (sha1 . offset)"
                   (setf (pack-entry-base-hash current-entry)
                         (switch (type)
                           (OBJ-REF-DELTA base-hash)
-                          (OBJ-OFS-DELTA (car (find (- (pack-entry-offset current-entry)
-                                                       base-offset)
-                                                    index :key #'cdr)))))))                        
+                          (OBJ-OFS-DELTA
+                           (let ((base-abs-offset
+                                  (- (pack-entry-offset current-entry)
+                                     base-offset)))
+                             (loop for key being the hash-keys of index-table
+                                   using (hash-value value)
+                                   when (or (and (consp value)
+                                                 (= (car value) base-abs-offset))
+                                            (and (not (consp value))
+                                                 (= (pack-entry-offset value)
+                                                    base-abs-offset)))
+                                   do return key)))))))
               ;; missing: depth
-              (setf (gethash (car (aref index i)) table) current-entry))))
+              (setf (gethash hash index-table) current-entry))))
     ;; update all types for delta entries, taking from most base entry.
     ;; We have to do it after collecting all the entries since for
     ;; OBJ-REF-DELTA delta format the base entry could follow the
@@ -248,6 +264,7 @@ INDEX is a sorted list of pairs (sha1 . offset)"
                          (pack-entry-depth entry) depth))))
              table)
     table))
+|#
 
 
 (defun get-base-pack-entry-type (table entry)
@@ -528,18 +545,66 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
 (defun parse-pack-file (filename)
   (make-instance 'pack-file :pack-filename filename))
 
+
+(defmethod create-new-entry ((self pack-file) hash entry stream)
+  (with-slots (index-table) self
+    (let ((current-entry (make-instance 'pack-entry
+                                        :offset (car entry)
+                                        :compressed-size (cdr entry))))
+      ;; parse new entry
+      ;; move position to the current entry offset
+      (file-position stream (pack-entry-offset current-entry))
+      ;; read the header - type (car header)
+      ;; and uncompressed size (cdr header)
+      (multiple-value-bind (type uncompr-len base-hash base-offset)
+          (read-pack-entry-header stream)
+        (setf (pack-entry-type current-entry) type
+              (pack-entry-uncompressed-size current-entry) uncompr-len
+              ;; the actual data starts here (we have read just up to
+              ;; the data
+              (pack-entry-data-offset current-entry) (file-position stream)
+              ;; update calculate the compressed size (size in pack file)
+              (pack-entry-compressed-size current-entry)
+              (- (cdr entry) (- (pack-entry-data-offset current-entry) (car entry))))
+        ;; handle entries with deltas
+        (when (or (= type OBJ-REF-DELTA)
+                  (= type OBJ-OFS-DELTA))
+          ;; set the parent hash                  
+          (setf (pack-entry-base-hash current-entry)
+                        (switch (type)
+                          (OBJ-REF-DELTA base-hash)
+                          (OBJ-OFS-DELTA
+                           (let ((base-abs-offset
+                                  (- (pack-entry-offset current-entry)
+                                     base-offset)))
+                             (loop for key being the hash-keys of index-table
+                                   using (hash-value value)
+                                   when (or (and (consp value)
+                                                 (= (car value) base-abs-offset))
+                                            (and (not (consp value))
+                                                 (= (pack-entry-offset value)
+                                                    base-abs-offset)))
+                                   return key)))))))
+      ;; missing: depth
+      (setf (gethash hash index-table) current-entry)
+      current-entry)))
+
+
 @export
 (defmethod pack-get-object-by-hash ((self pack-file) hash)
   "Find the object in the packfile. Return the uncompressed object
 from the pack file as a vector of bytes."
   (with-slots (pack-filename index-table) self
+    (sha1-hex-to-array hash *sha1-binary-array*)
     ;; find the object
-    (when-let (entry (gethash hash index-table))
+    (when-let (entry (gethash *sha1-binary-array* index-table))
       ;; open pack file
       (with-open-file (stream
                        pack-filename
                        :direction :input
                        :element-type '(unsigned-byte 8))
+        (when (typep entry 'cons) ; not an entry yet, create one
+          (setf entry (create-new-entry self *sha1-binary-array* entry stream)))
         ;; if not a delta object just return it
         (if (not (pack-entry-base-hash entry))
             (get-object-chunk entry stream)
