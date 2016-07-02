@@ -84,10 +84,7 @@
          :documentation "type of the entry. Ether commit(1), tree(2), blob(3) or tag(4")
    (depth :initarg :depth :initform nil
           :accessor pack-entry-depth
-          :documentation "if the entry is a delta, the number of other entries what follows")
-   (base-hash :initarg :depth :initform nil
-              :accessor pack-entry-base-hash
-              :documentation "the SHA1 code of the base object if the entry is delta"))
+          :documentation "if the entry is a delta, the number of other entries what follows"))
   (:documentation "Entry in the pack file. This struct represents all the information
 one could get for the pack file entry without actually unpacking it.
 The data could be used in the following way:
@@ -96,7 +93,7 @@ The data could be used in the following way:
 3. Uncompress it to the array of size at least UNCOMPRESSED-SIZE bytes
 4. Parse the data using parser for the TYPE
 For deltas additional steps required."))
-  
+
 
 (defmethod (setf pack-entry-type) (value (entry pack-entry))
   (setf (slot-value entry 'type) value)
@@ -123,6 +120,33 @@ For deltas additional steps required."))
             (pack-entry-depth entry)
             (pack-entry-base-hash entry)))
   (format stream "~%"))
+
+
+(defclass pack-entry-ref-delta (pack-entry)
+  ((base-hash :initarg :base-hash :initform nil
+              :accessor pack-entry-base-hash
+              :documentation "the SHA1 code of the base object"))
+  (:documentation "Pack entry of type delta with base object hash"))
+
+(defclass pack-entry-ofs-delta (pack-entry)
+  ((base-offset :initarg :base-offset :initform nil
+                :accessor pack-entry-base-offset
+                :documentation "the offset to the parent base object"))
+  (:documentation "Pack entry of type delta with offset"))
+
+
+
+@export-class
+(defclass pack-file ()
+  ((pack-filename :initarg :pack-filename :initform nil :reader pack-filename)
+   (index-table :initform nil :reader index-table))
+  (:documentation "A class representing the pack file contents"))
+
+
+(defmethod initialize-instance :after ((self pack-file) &key &allow-other-keys)
+  "Constructor for the pack-file class"
+  (with-slots (pack-filename) self
+    (parse-pack-file-impl self pack-filename)))
 
 
 (defun pack-filename-to-index (filename)
@@ -266,7 +290,7 @@ INDEX is a sorted list of pairs (sha1 . offset)"
     table))
 |#
 
-
+#|
 (defun get-base-pack-entry-type (table entry)
   "Returs VALUES(type, depth) for the given HASH in hash-table TABLE"
   (let ((parent-hash nil)
@@ -280,7 +304,7 @@ INDEX is a sorted list of pairs (sha1 . offset)"
                 depth (1+ depth)) ; if no parent then depth = 0
           while parent)
     (values type depth)))
-
+|#
 
 (defun read-pack-entry-header (stream)
   "Reads the current stream for git pack entry header.
@@ -359,6 +383,7 @@ And finally the length is 6144 + 1733 = 7833
        ;; read the variable-length integer
        (setf base-offset (read-network-vli stream))))
     (values type len base-hash base-offset)))
+
 
 (defun read-network-vli (stream)
   "Read the variable-length integer from the stream.
@@ -447,10 +472,6 @@ little-endian format, therefore the most significant byte comes last"
           (sort index #'< :key (lambda (x) (the integer (car x)))))))))
 
           
-
-               
-          
-
 (defun read-fanout-table (stream)
   "Reads the fanout table for index file from stream.
 According to the documentation (https://www.kernel.org/pub/software/scm/git/docs/technical/pack-format.txt):
@@ -528,18 +549,6 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
                 (aref big-offsets-table (cdr x))))))
     offsets))
 
-@export-class
-(defclass pack-file ()
-  ((pack-filename :initarg :pack-filename :initform nil :reader pack-filename)
-   (index-table :initform nil :reader index-table))
-  (:documentation "A class representing the pack file contents"))
-
-
-(defmethod initialize-instance :after ((self pack-file) &key &allow-other-keys)
-  "Constructor for the pack-file class"
-  (with-slots (pack-filename) self
-    (parse-pack-file-impl self pack-filename)))
-
 
 @export
 (defun parse-pack-file (filename)
@@ -577,6 +586,7 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
                            (let ((base-abs-offset
                                   (- (pack-entry-offset current-entry)
                                      base-offset)))
+                             ;; NOTE: this is slow
                              (loop for key being the hash-keys of index-table
                                    using (hash-value value)
                                    when (or (and (consp value)
@@ -588,6 +598,7 @@ Retuns an array of size SIZE with elements 4-bytes arrays with CRC codes"
       ;; missing: depth
       (setf (gethash hash index-table) current-entry)
       current-entry)))
+
 
 
 @export
