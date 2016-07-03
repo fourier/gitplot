@@ -131,7 +131,7 @@ NOTE: OFFSET is ignored for streams"
 
 
 (defun sha1-array-to-hex (array offset)
-  (declare (optimize (speed 3) (safety 0)))
+  (declare (optimize (speed 3) (safety 0) (float 0)))
   (declare ((unsigned-byte 8) num))
   (macrolet ((digit-to-hex (dig)
                (let ((digit-var (gensym)))

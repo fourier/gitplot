@@ -198,7 +198,9 @@ the value is a instance of PACK-ENTRY structure."
 (offset . compressed-size),  offset in the pack file and compressed
 size(including header).
 INDEX is a sorted list of pairs (sha1 . offset)"
+  (declare (optimize (float 0)))
   (let ((table (make-hash-table :test #'equalp :size (length index)))
+        (offsets-table (make-hash-table :test #'eq :size (length index)))
         (file-length (file-length stream)))
     ;; fill the table.
     (loop for i from 0 below (length index) do
@@ -213,9 +215,10 @@ INDEX is a sorted list of pairs (sha1 . offset)"
                          ;; or end of file(without SHA-1 trailer of 20 bytes)
                          (- file-length 20)) 
                      offset)))
-
             (setf (gethash (cdr (aref index i)) table)
-                  (cons offset compressed-size))))
+                  (cons offset compressed-size)
+                  (gethash offset offsets-table)
+                  (cdr (aref index i)))))
                   #|
                 (make-instance 'pack-entry
                                :offset offset
@@ -493,7 +496,7 @@ less or equal to 256, as the byte <= 256"
 
 (defun read-object-names (stream size)
   "Read the SIZE 20-bytes SHA1 codes of objects stored in PACK file"
-  (let ((object-names (make-array size :element-type '(vector unsigned-byte 8) :adjustable nil)))
+  (let ((object-names (make-array size  :adjustable nil)))
     (loop for i from 0 below size do
           (let ((hash (make-array +sha1-size+ :element-type '(unsigned-byte 8) :adjustable nil)))
             (read-sequence hash stream)
