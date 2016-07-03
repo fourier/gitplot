@@ -50,14 +50,20 @@
                  (found-pack
                   ;; iterate oven all pack files trying to find the one having hash
                   (loop for pack in pack-files
-                        when (setf result (gethash hash (index-table pack))) return pack)))
+                        when
+                        (= (length
+                            (setf result (multiple-value-list
+                                          (pack-get-object-by-hash pack hash))))
+                                 2)
+                        return pack)))
             ;; ok pack and corresponding index entry found 
             (when (and result found-pack)
               ;; get the data from pack file
-              (let ((data (pack-get-object-by-hash found-pack hash)))
+              (let ((data (car result))
+                    (type (cadr result)))
                 (when data
                   ;; and finally parse the data (the type is known from index)
-                  (parse-git-object (pack-entry-type result)
+                  (parse-git-object type
                                     data
                                     hash
                                     :start 0
