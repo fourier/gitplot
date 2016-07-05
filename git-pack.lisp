@@ -136,6 +136,26 @@ For deltas additional steps required."))
   (with-slots (pack-filename) self
     (parse-pack-file-impl self pack-filename)))
 
+@export
+(defmethod pack-open-stream ((self pack-file))
+  "Opens the file stream for the pack-file SELF.
+It is convenient to open stream once for all search operations in the packfile.
+Don't forget to close it with corresponding call pack-close-stream"
+  (with-slots (pack-filename pack-stream) self
+    (when pack-stream
+      (close pack-stream)
+      (setf pack-stream nil))
+    (setf pack-stream (open pack-filename :direction :input :element-type '(unsigned-byte 8)))))
+
+@export
+(defmethod pack-close-stream ((self pack-file))
+  "Closes the file stream for the pack-file SELF.
+The stream is previously opened with pack-close-stream"
+  (with-slots (pack-stream) self
+    (when pack-stream
+      (close pack-stream)
+      (setf pack-stream nil))))
+
 
 (defun pack-filename-to-index (filename)
   "Convert pack file name to index file name (by replacing extension)"
@@ -500,21 +520,27 @@ HASH is as SHA1 code as as string (40 hex characters)"
   (sha1-hex-to-array hash *sha1-binary-array*)
   (pack-get-object-by-array-hash self *sha1-binary-array*))
 
+
 (defmethod pack-get-object-by-array-hash ((self pack-file) hash)
   "Find the object in the packfile. Return the uncompressed object
 from the pack file as a vector of bytes.
 HASH is as SHA1 code as a byte array (20 values)"
-  (with-slots (pack-filename index-table) self
-    ;; find the object
-    (when-let (entry (gethash hash index-table))
-      ;; open pack file
-      (with-open-file (stream
-                       pack-filename
-                       :direction :input
-                       :element-type '(unsigned-byte 8))
-        (when (typep entry 'cons) ; not an entry yet, create one
-          (setf entry (create-new-entry self hash entry stream)))
-        (values (get-object-chunk entry self stream) (pack-entry-type entry))))))
+  (flet ((stream-get-object-by-array-hash (stream entry)
+           (when (typep entry 'cons) ; not an entry yet, create one
+             (setf entry (create-new-entry self hash entry stream)))
+           (values (get-object-chunk entry self stream) (pack-entry-type entry))))
+    (with-slots (pack-filename index-table pack-stream) self
+      ;; find the object
+      (when-let (entry (gethash hash index-table))
+        ;; if stream is opened already
+        (if pack-stream
+            (stream-get-object-by-array-hash pack-stream entry)
+            ;; otherwise open pack file
+            (with-open-file (stream
+                             pack-filename
+                             :direction :input
+                             :element-type '(unsigned-byte 8))
+              (stream-get-object-by-array-hash stream entry)))))))
 
 
 (defun get-object-data (entry stream)

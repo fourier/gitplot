@@ -65,13 +65,13 @@ In the last example imports all the exported symbols from the package given."
 @export
 (defun read-binary-file (filename)
   "Return an array of file contents"
-  (let* ((size (file-size filename))
-         (buffer (make-array size
-                             :element-type '(unsigned-byte 8)
-                             :fill-pointer t)))
-    (with-open-file (stream filename :direction :input :element-type '(unsigned-byte 8))
-      (read-sequence buffer stream))
-    buffer))
+  (with-open-file (stream filename :direction :input :element-type '(unsigned-byte 8))
+    (let* ((size (file-length stream))
+           (buffer (make-array size
+                               :element-type '(unsigned-byte 8)
+                               :fill-pointer t)))
+      (read-sequence buffer stream)
+      buffer)))
 
 
 @export

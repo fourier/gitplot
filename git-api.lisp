@@ -35,7 +35,12 @@
       (setf path (concatenate 'string path "/")))
     ;; collect all pack files
     (let ((files (directory (concatenate 'string path ".git/objects/pack/*.pack"))))
-      (mapcar (lambda (pack) (push (parse-pack-file (namestring pack)) pack-files)) files))
+      (mapcar (lambda (pack)
+                (push (parse-pack-file (namestring pack)) pack-files))
+              files))
+    ;; open file streams in pack files
+    (dolist (pack pack-files)
+      (pack-open-stream pack))
     ;; read all refs from the packed-refs
     (let ((packed-refs-filename (concatenate 'string path ".git/packed-refs")))
       (when (fad:file-exists-p packed-refs-filename)
@@ -57,6 +62,12 @@
                               prev-ref (cadr ref)))))))))))
 
 
+(defmethod git-repo-close ((self git-repo))
+  (with-slots (pack-files) self
+    ;; open file streams in pack files
+    (dolist (pack pack-files)
+      (pack-close-stream pack))))
+    
 
 
 @export
