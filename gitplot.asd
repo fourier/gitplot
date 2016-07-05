@@ -7,6 +7,7 @@
   :depends-on (#:alexandria     ; general utilities
                #:cl-fad         ; files manipulation
                #:cl-annot       ; export annotations
+               #:cl-ppcre       ; portable regular expressions
                #:babel          ; bytes to string
                #:zlib           ; zlib to deal with git objects
                #:split-sequence ; general split

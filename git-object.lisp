@@ -109,12 +109,7 @@ and returns a PAIR:
                                        :errorp nil
                                        :encoding :utf-8))
          (last-char-pos (1- (length text)))
-         (newline-position (min (adjacent-find text
-                                               :first start
-                                               :last (length text)
-                                               :test (lambda (x y)
-                                                       (and (char= x y)
-                                                            (char= x #\newline))))
+         (newline-position (min (find-consecutive-newlines text)
                                 last-char-pos))
          (header (subseq text 0 newline-position))
          (comment (if (> last-char-pos newline-position)
@@ -122,6 +117,27 @@ and returns a PAIR:
                       "")))
     (cons (split-sequence:split-sequence #\newline header)
           comment)))
+
+
+(defun find-consecutive-newlines (str &key (first 0) (last (length str)))
+  "Find 2 consecutive newlines in the string STR.
+Returns the index of the first element found or size of STR if
+nothing found"
+  (declare (type string str)
+           (type integer first)
+           (type integer last)
+           (optimize speed))
+  (if (/= first last)
+      (let ((next (1+ first)))
+        (loop while (/= next last)
+              do
+              (if (char= (char str first) (char str next) #\newline)
+                  (return first)
+                  (progn
+                    (incf first)
+                    (incf next)))
+              finally (return last)))
+      last))
 
 
 (defmethod parse-git-object ((obj (eql :commit)) data hash &key start size)

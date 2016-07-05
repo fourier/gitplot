@@ -7,12 +7,23 @@
 (annot:enable-annot-syntax)
 
 ;;----------------------------------------------------------------------------
+;; Constants
+;;----------------------------------------------------------------------------
+
+(defconstant +git-objects-dir-regexp+ (ppcre:create-scanner "(?i)/([0-9|a-f]){2}/$")
+  "Regular expression scanner used to determine which of directories
+in .git/objects are containing objects (not a packfiles or info)")
+  
+
+;;----------------------------------------------------------------------------
 ;; Repository class
 ;;----------------------------------------------------------------------------
 @export-class
 (defclass git-repo ()
   ((path :initarg :path :reader repo-path
          :documentation "Path to the repository")
+   (object-files :reader object-files :initform (make-hash-table :test #'string=)
+                 :documentation "A hash table with the SHA1 hex as a key and filename as a value for all unpacked objects in .git/objects directory")
    (pack-files :reader pack-files :initform nil
                :documentation "List of pack-file objects")
    (packed-refs :reader packed-refs :initform (make-hash-table :test #'string=)
@@ -29,7 +40,7 @@
 
 (defmethod initialize-instance :after ((self git-repo) &key &allow-other-keys)
   "Constructor for the git-repo class"
-  (with-slots (path pack-files packed-refs annotated-tags) self
+  (with-slots (path pack-files packed-refs annotated-tags object-files) self
     ;; append trailing "/"
     (unless (ends-with "/" path)
       (setf path (concatenate 'string path "/")))
@@ -59,8 +70,29 @@
                         (setf (gethash prev-ref annotated-tags)
                               (subseq (car ref) 1))
                         (setf (gethash (cadr ref) packed-refs) (car ref)
-                              prev-ref (cadr ref)))))))))))
+                              prev-ref (cadr ref)))))))))
+    ;; find all not-packed object files in repo
+    (update-repo-objects self)))
 
+(defmethod update-repo-objects ((self git-repo))
+  (with-slots (object-files path) self
+    (let ((object-dirs 
+           (remove-if-not
+            (curry #'ppcre:scan +git-objects-dir-regexp+)
+            (mapcar #'namestring
+                    (fad:list-directory (concatenate 'string path ".git/objects/"))))))
+      (loop for dir in object-dirs
+            do
+            (loop for fil in (mapcar #'namestring (fad:list-directory dir))
+                  do
+                  (let ((pos (position #\/ fil :from-end t)))
+                    (setf (gethash
+                           (concatenate 'string (subseq fil (- pos 2) pos)
+                                        (subseq fil (1+ pos)))
+                           object-files)
+                          (pathname fil))))))))
+                                  
+    
 
 (defmethod git-repo-close ((self git-repo))
   (with-slots (pack-files) self
@@ -74,7 +106,7 @@
 (defmethod get-object-by-hash ((self git-repo) hash)
   "Returns the object by the given hash string"
   ;; first try if the file exists
-  (with-slots (path pack-files) self
+  (with-slots (path pack-files object-files) self
     ;; no file exist
     (let* ((result nil)
            (found-pack
@@ -99,15 +131,8 @@
                                 hash
                                 :start 0
                                 :size (length data))))
-          (let ((file-object-name (fad:file-exists-p (concatenate 'string
-                                                                  path
-                                                                  ".git/objects/"
-                                                                  (subseq hash 0 2)
-                                                                  "/"
-                                                                  (subseq hash 2)))))
-            ;; probe if exists
-            (when file-object-name
-              (parse-git-file file-object-name)))))))
+          ;; otherwise read git file
+          (parse-git-file (gethash hash object-files))))))
 
 
 @export

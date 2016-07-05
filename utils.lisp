@@ -84,26 +84,6 @@ read up to the size of file"
              (buffer (make-array (min size fsize) :element-type elt-type)))
         (read-sequence buffer in)
         buffer))))
-
-
-@export
-(defun adjacent-find (vec &key (first 0) (last (length vec)) (test #'equal))
-  "Find 2 adjacent equal elements in VEC.
-Alternatively if TEST given, 2 adjactent elements ONE TWO for those
-(TEST ONE TWO) returns not nil.
-Returns the index of the first element found or size of VEC if
-nothing found"
-  (if (/= first last)
-      (let ((next (1+ first)))
-        (loop while (/= next last)
-              do
-              (if (funcall test (elt vec first) (elt vec next))
-                  (return first)
-                  (progn
-                    (incf first)
-                    (incf next)))
-              finally (return last)))
-      last))
             
 
 @export
