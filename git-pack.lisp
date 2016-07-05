@@ -125,6 +125,7 @@ For deltas additional steps required."))
 @export-class
 (defclass pack-file ()
   ((pack-filename :initarg :pack-filename :initform nil :reader pack-filename)
+   (pack-stream :initarg :pack-stream :initform nil :reader pack-stream)
    (index-table :initform nil :reader index-table)
    (offsets-table :initform nil :reader offsets-table))
   (:documentation "A class representing the pack file contents"))

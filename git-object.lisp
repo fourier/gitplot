@@ -83,7 +83,8 @@
          ;; guess the hash. hash is the last 41 (40 hash + 1 directory separator)
          ;; characters of the filename, if the filename is in git repository
          ;; and not renamed git object
-         (hash-filename (subseq filename (- (length filename) 41))))
+         (name (if (pathnamep filename) (namestring filename) filename))
+         (hash-filename (subseq name (- (length name) 41))))
     (parse-git-object (intern (string-upcase (car header-split)) "KEYWORD")
                       data
                       (remove #\/ hash-filename) ;; remove dir separator
@@ -105,6 +106,7 @@ and returns a PAIR:
   (let* ((text (babel:octets-to-string data
                                        :start start
                                        :end (+ start size)
+                                       :errorp nil
                                        :encoding :utf-8))
          (last-char-pos (1- (length text)))
          (newline-position (min (adjacent-find text

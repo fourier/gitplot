@@ -1,7 +1,6 @@
 ;;;; app.lisp
 (defpackage #:gitplot.app
-  (:add-use-defaults t)
-  (:use #:cl :capi) 
+  (:use #:cl #:capi #:gitplot.git-api #:gitplot.git-object #:alexandria) 
   (:export main))
 
 (in-package #:gitplot.app)
@@ -9,19 +8,29 @@
 ;;; constants
 
 
+;;; globals
+(defparameter *main-window* nil
+  "Main application window - global object")
+
 ;;----------------------------------------------------------------------------
 ;; The main window
 ;;----------------------------------------------------------------------------
 
 (capi:define-interface gitplot-main-window ()
-  ((application-interface :initarg :application-interface))
+  ((application-interface :initarg :application-interface)
+   (repo :initform nil))
   (:panes
    (git-directory-edit text-input-pane 
                        :title "Path to Git repository"
                        :text "/Users/alexeyv/Sources/melpa" ;; temporary
                        :buttons 
                        '(:browse-file (:directory t :image :std-file-open) :ok nil))
-   (plot-pane graph-pane :children-function 'node-children)
+   (plot-pane graph-pane
+              :children-function 'get-drawable-commit-parents
+              :layout-function :top-down
+              :print-function (lambda (x)
+                                (with-input-from-string (s (commit-comment x))
+                                  (read-line s))))
    (log-pane collector-pane :buffer-name "GitPlot Output buffer")
    (draw-button push-button :text "Redraw" :callback 'on-draw-button))
   (:layouts
@@ -56,13 +65,28 @@
   "Callback called when Redraw button is pressed"
   (declare (ignore data))
   (with-slots (git-directory-edit
-               plot-pane
-               log-pane) self
-    (let ((repo (text-input-pane-text git-directory-edit)))
+               repo) self
+    (let ((repo-path (text-input-pane-text git-directory-edit)))
       ;; verify the path exists and not empty
-      (when (and (> (length repo) 0)
-                 (lw:file-directory-p repo))
-        nil))))
+      (when (and (> (length repo-path) 0)
+                 (lw:file-directory-p repo-path))
+        ;; create a repository object and refresh view
+        (setf repo (make-git-repo repo-path))
+        (refresh self)))))
+
+
+(defmethod refresh ((self gitplot-main-window))
+  (with-slots (plot-pane
+               log-pane
+               repo) self
+    (when repo
+      (setf (graph-pane-roots plot-pane) (get-head-commit repo)))
+  ))
+
+
+(defmethod get-drawable-commit-parents ((commit gitplot.git-object:commit))
+  (get-commit-parents (slot-value *main-window* 'repo) commit))
+  
 
 ;;----------------------------------------------------------------------------
 ;; The application interface
@@ -97,11 +121,11 @@
     ;; functionality.
     (capi:set-application-interface application)
     ;; Start the application with its single window.
-    (let ((main-window (make-instance 'gitplot-main-window
-                                      :application-interface application)))
-      (setf (main-window application)
-            main-window)
-      (capi:display main-window))))
+    (setf *main-window* (make-instance 'gitplot-main-window
+                                       :application-interface application))
+    (setf (main-window application)
+          *main-window*)
+    (capi:display *main-window*)))
 
 
 
