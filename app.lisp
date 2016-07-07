@@ -1,6 +1,6 @@
 ;;;; app.lisp
 (defpackage #:gitplot.app
-  (:use #:cl #:capi #:gitplot.git-api #:gitplot.git-object #:alexandria) 
+  (:use #:cl #:capi #:git-api.repo #:git-api.object #:alexandria) 
   (:export main))
 
 (in-package #:gitplot.app)
@@ -29,8 +29,10 @@
               :children-function 'get-drawable-commit-parents
               :layout-function :top-down
               :print-function (lambda (x)
-                                (with-input-from-string (s (commit-comment x))
-                                  (read-line s))))
+                                (format nil "\"~a\"~%~a"
+                                        (with-input-from-string (s (commit-comment x))
+                                          (read-line s))
+                                        (object-hash x))))
    (log-pane collector-pane :buffer-name "GitPlot Output buffer")
    (draw-button push-button :text "Redraw" :callback 'on-draw-button))
   (:layouts
@@ -84,7 +86,7 @@
   ))
 
 
-(defmethod get-drawable-commit-parents ((commit gitplot.git-object:commit))
+(defmethod get-drawable-commit-parents ((commit git-api.object:commit))
   (get-commit-parents (slot-value *main-window* 'repo) commit))
   
 

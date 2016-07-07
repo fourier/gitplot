@@ -9,8 +9,9 @@
 ;;----------------------------------------------------------------------------
 ;; Constants
 ;;----------------------------------------------------------------------------
-(defconstant *zero-ascii-begin* (char-code #\0))
-(defconstant *char-ascii-begin* (char-code #\a))
+(defparameter *zero-ascii-begin* (char-code #\0))
+(defparameter *char-ascii-begin* (char-code #\a))
+(declaim (type fixnum *zero-ascii-begin* *char-ascii-begin*))
 
 
 ;;----------------------------------------------------------------------------
@@ -110,45 +111,50 @@ NOTE: OFFSET is ignored for streams"
     s)))
 
 
+(defmacro digit-to-hex (dig)
+  "Convert number (0..15) to corresponding hex character"
+  (let ((digit-var (gensym)))
+    `(let ((,digit-var ,dig))
+       (declare (type fixnum ,digit-var))
+       (the character
+            (code-char
+             (if (< ,digit-var 10)
+                 (+ *zero-ascii-begin* ,digit-var)
+                 (+ (the fixnum (- ,digit-var 10)) *char-ascii-begin*)))))))
+
+
 (defun sha1-array-to-hex (array offset)
-  (declare (optimize (speed 3) (safety 0) (float 0)))
-  (declare ((unsigned-byte 8) num))
-  (macrolet ((digit-to-hex (dig)
-               (let ((digit-var (gensym)))
-                 `(let ((,digit-var ,dig))
-                    (if (< ,dig 10)
-                        (+ *zero-ascii-begin* ,dig)
-                        (+ (- ,dig 10) *char-ascii-begin*))))))
-    (let ((hex (make-array 40 :element-type 'character :fill-pointer 0 :adjustable nil))) 
-      (dotimes (x 20)
-        (declare (integer x))
-        (let ((byte (aref array (+ x offset))))
-          (declare ((unsigned-byte 8) byte)) 
-          (let* ((upper-byte (ash byte -4))
-                 (lower-byte (- byte (ash upper-byte 4))))
-            (vector-push (code-char (digit-to-hex upper-byte)) hex)
-            (vector-push (code-char (digit-to-hex lower-byte)) hex))))
-      hex)))
+  ;;(declare (:explain :variables :calls))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type fixnum offset lower-byte upper-byte))
+  (let ((hex (make-array 40 :element-type 'character :adjustable nil))) 
+    (dotimes (x 20)
+      (declare (type fixnum x))
+      (let ((byte (aref array (the fixnum (+ x offset)))))
+        (declare (type fixnum byte)) 
+        (let* ((upper-byte (ash byte -4))
+               (lower-byte (the fixnum (- byte (the fixnum (ash upper-byte 4)))))
+               (pos (the fixnum (* 2 x))))
+          (setf (schar hex pos) (digit-to-hex upper-byte)
+                (schar hex (the fixnum (1+ pos))) (digit-to-hex lower-byte)))))
+    hex))
+
 
 (defun sha1-stream-to-hex (stream)
-  (declare (optimize (speed 3) (safety 0)))
-  (declare ((unsigned-byte 8) num))
-  (macrolet ((digit-to-hex (dig)
-               (let ((digit-var (gensym)))
-                 `(let ((,digit-var ,dig))
-                    (if (< ,dig 10)
-                        (+ *zero-ascii-begin* ,dig)
-                        (+ (- ,dig 10) *char-ascii-begin*))))))
-    (let ((hex (make-array 40 :element-type 'character :fill-pointer 0 :adjustable nil))) 
-      (dotimes (x 20)
-        (declare (integer x))
-        (let ((byte (read-byte stream)))
-          (declare ((unsigned-byte 8) byte)) 
-          (let* ((upper-byte (ash byte -4))
-                 (lower-byte (- byte (ash upper-byte 4))))
-            (vector-push (code-char (digit-to-hex upper-byte)) hex)
-            (vector-push (code-char (digit-to-hex lower-byte)) hex))))
-      hex)))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type fixnum offset lower-byte upper-byte))
+  (let ((hex (make-array 40 :element-type 'character :adjustable nil))) 
+    (dotimes (x 20)
+      (declare (type fixnum x))
+      (let ((byte (read-byte stream)))
+        (declare (type fixnum byte)) 
+        (let* ((upper-byte (ash byte -4))
+               (lower-byte (the fixnum (- byte (the fixnum (ash upper-byte 4)))))
+               (pos (the fixnum (* 2 x))))
+          (setf (schar hex pos) (digit-to-hex upper-byte)
+                (schar hex (the fixnum (1+ pos))) (digit-to-hex lower-byte)))))
+    hex))
+
 
 @export
 (defun sha1-hex-to-array (sha1string &optional result)
@@ -156,20 +162,23 @@ NOTE: OFFSET is ignored for streams"
 to the byte array.
 If RESULT array is given - write to this array"
   (declare (optimize (speed 3) (safety 0)))
-  (declare ((unsigned-byte 8) upper-val))
-  (declare ((unsigned-byte 8) lower-val))
+  ;;(declare (:explain :variables :calls))
+  (declare (fixnum upper-val lower-val))
   (unless result
-    (setf result (make-array 20 :element-type '(unsigned-byte 8) :fill-pointer 0 :adjustable nil)))
+    (setf result (make-array 20 :element-type '(unsigned-byte 8) :adjustable nil)))
   (macrolet ((hex-to-number (hex)
                (let ((hex-var (gensym)))
-                 `(let ((,hex-var (char-code ,hex)))
-                    (if (>= ,hex-var *char-ascii-begin*)
-                        (+ 10 (- ,hex-var *char-ascii-begin*))
-                        (- ,hex-var *zero-ascii-begin*))))))
+                 `(let ((,hex-var (the fixnum (char-code ,hex))))
+;;                    (declare (type fixnum ,hex-var))
+                    (the fixnum (if (>= ,hex-var *char-ascii-begin*)
+                                    (+ 10 (the fixnum (- ,hex-var *char-ascii-begin*)))
+                                    (- ,hex-var *zero-ascii-begin*)))))))
     (dotimes (x 20)
-      (let ((upper-val (hex-to-number (aref sha1string (* x 2))))
-            (lower-val (hex-to-number (aref sha1string (1+ (* x 2))))))
-        (setf (aref result x) (+ (ash upper-val 4) lower-val)))))
+      (declare (type fixnum x))
+      (let* ((pos (the fixnum (* 2 x)))
+             (upper-val (hex-to-number (schar sha1string pos)))
+             (lower-val (hex-to-number (schar sha1string (the fixnum (1+ pos))))))
+        (setf (aref result x) (the fixnum (+ (the fixnum (ash upper-val 4)) lower-val))))))
   result)
 
   
